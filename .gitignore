@@ -1,0 +1,5 @@
+likid-*
+.DS_Store
+.vscode
+__pycache__
+test_likid
