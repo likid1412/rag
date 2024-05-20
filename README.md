@@ -19,8 +19,12 @@ an application that integrates file handling, simulates Optical Character Recogn
 # build
 docker build -t rag .
 
-# run
+# run, 9090 for accessing minio
 docker run -dt \
     --name rag-test  \
-    python:3.10
+    -p 80:80 \
+    -p 9090:9090 \
+    rag
 ```
+
+ref: [FastAPI in Containers - Docker - FastAPI](https://fastapi.tiangolo.com/deployment/docker/)
