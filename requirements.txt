@@ -2,3 +2,10 @@ openai
 fastapi
 python-multipart
 minio
+pytz
+loguru
+requests
+tencentcloud-sdk-python-hunyuan
+tcvectordb
+pytest
+pytest-mock

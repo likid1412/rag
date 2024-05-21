@@ -2,19 +2,24 @@
 
 import os
 import io
-import uuid
 from typing import BinaryIO
-from datetime import timedelta
-from http import HTTPStatus
+from datetime import datetime, timedelta
+import pytz
+from loguru import logger
 from minio import Minio
 from minio.error import S3Error
-from fastapi import HTTPException, UploadFile
+from fastapi import UploadFile
+import starlette.datastructures
+from app.helper.file import get_unique_filename, FileInfo
 
 
 class Storage:
     """Handle Storage operations, such as upload file"""
 
     RAG_Bucket = "rag"
+
+    _client: Minio
+    _bucket: str
 
     def __init__(self, bucket: str):
         """
@@ -39,8 +44,53 @@ class Storage:
             secure=False,
         )
 
+    def get_file_dict_list(self, files: list[UploadFile]) -> list[dict]:
+        """return a list contain
+        {"file": UploadFile, "file_info": FileInfo} dict
+
+        Args:
+            files (list[UploadFile]): uploaded files
+
+        Returns:
+            list[dict]: a list contain
+        {"file": UploadFile, "file_info": FileInfo} dict
+        """
+
+        file_data: list[dict] = []
+        for file in files:
+            file_info = get_unique_filename(file.filename)
+            file_data.append({"file": file, "file_info": file_info})
+        return file_data
+
+    def _check_file_params(self, file_dict_list: list[dict]) -> None:
+        for file_dict in file_dict_list:
+            logger.debug(f"file_dict: {file_dict}")
+            msg = ""
+            if "file" not in file_dict:
+                msg = "file not in file_dict"
+            elif "file_info" not in file_dict:
+                msg = "file_info not in file_dict"
+            elif not isinstance(
+                file_dict["file"], starlette.datastructures.UploadFile
+            ):
+                # isinstance(file_dict["file"], UploadFile) return False,
+                # use starlette.datastructures.UploadFile instead
+                msg = f"{file_dict['file']} file value is not UploadFile type"
+            elif not isinstance(file_dict["file_info"], FileInfo):
+                msg = (
+                    f"{file_dict['file_info']} file_info"
+                    f" value is not FileInfo type"
+                )
+            elif file_dict["file"].file.closed:
+                msg = f"{file_dict['file'].filename} is closed"
+
+            if len(msg) > 0:
+                logger.error(msg)
+                raise ValueError(msg)
+
     async def upload_file_and_get_presigned_url(
-        self, files: list[UploadFile]
+        self,
+        file_dict_list: list[dict],
     ) -> list[dict]:
         """
         Uploads files to storage,
@@ -54,35 +104,42 @@ class Storage:
             unique file id and presigned url
 
         Raises:
-            HTTPException: If upload to storage failed
+            ValueError: files invalid
         """
 
-        result: list[dict] = []
+        self._check_file_params(file_dict_list)
 
-        for file in files:
-            # upload
-            # Generate a unique filename using the original filename and a UUID
-            unique_filename = f"{uuid.uuid4()}_{file.filename}"
+        upload_result: list[dict] = []
+
+        # upload
+        for file_dict in file_dict_list:
+            file: UploadFile = file_dict["file"]
+            file_info: FileInfo = file_dict["file_info"]
             file_content = await file.read()
             self.upload_file_data(
-                destination_file=unique_filename,
+                destination_file=file_info.file_unique_name,
                 data=io.BytesIO(file_content),
                 length=len(file_content),
                 content_type=file.content_type,
             )
 
             # get signed url and etag as file id
-            presigned_url = self.get_presigned_url(unique_filename)
-            result.append(
+            expires = timedelta(days=7)
+            presigned_url = self._client.presigned_get_object(
+                bucket_name=self._bucket,
+                object_name=file_info.file_unique_name,
+                expires=expires,
+            )
+            upload_result.append(
                 {
-                    "filename": file.filename,
-                    "file_id": unique_filename,
-                    "presigned_url": presigned_url,
+                    "file_info": file_info,
+                    "signed_url": presigned_url,
+                    "expires": self._get_formatted_date(expires),
                 }
             )
 
-        print(f"result: {result}")
-        return result
+        logger.info(f"upload_result: {upload_result}")
+        return upload_result
 
     def check_or_make_bucket(self):
         """Make the bucket if it doesn't exist."""
@@ -90,9 +147,9 @@ class Storage:
         found = self._client.bucket_exists(self._bucket)
         if not found:
             self._client.make_bucket(self._bucket)
-            print("Created bucket", self._bucket)
+            logger.info("Created bucket", self._bucket)
         else:
-            print("Bucket", self._bucket, "already exists")
+            logger.info("Bucket", self._bucket, "already exists")
 
     def upload_file_data(
         self,
@@ -100,7 +157,7 @@ class Storage:
         data: BinaryIO,
         length: int,
         content_type: str,
-    ):
+    ) -> None:
         """
         Uploads data from source_file to an destination bucket and filename.
 
@@ -121,16 +178,18 @@ class Storage:
 
             # Upload the file, renaming it in the process
             result = self._client.put_object(
-                self._bucket, destination_file, data, length, content_type
+                bucket_name=self._bucket,
+                object_name=destination_file,
+                data=data,
+                length=length,
+                content_type=content_type,
             )
 
         except S3Error as e:
-            raise HTTPException(
-                status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-                detail=f"MinIO error: {str(e)}",
-            ) from e
+            logger.error(f"MinIO error: {str(e)}")
+            raise e
 
-        print(
+        logger.info(
             "successfully uploaded as object",
             destination_file,
             "to bucket",
@@ -139,26 +198,27 @@ class Storage:
             f" etag: {result.etag}, version-id: {result.version_id}",
         )
 
-    def get_presigned_url(
-        self,
-        file_name: str,
-        expires: timedelta = timedelta(days=7),
-    ) -> str:
+    def _get_formatted_date(self, expires: timedelta, timezone="Asia/Shanghai"):
         """
-        Get presigned URL of an object to download its data with expiry time
+        Formatted date as "MM/DD/YYYY HH:MM:SS GMT+offset"
+        by adding a timedelta to the current date in a specified timezone
 
         Args:
-            file_name (str): Name of the file.
-            expires (timedelta): Expiry in seconds; defaults to 7 days.
+            expires (timedelta): The timedelta object representing the duration
+            to add to the current date.
+            timezone (str, optional): The timezone identifier.
+            Defaults to "Asia/Shanghai".
 
         Returns:
-            str: URL string.
+            str: The formatted date string in the specified format.
         """
 
-        # Get presigned URL string to download 'my-object' in
-        # 'my-bucket' with two hours expiry.
-        return self._client.presigned_get_object(
-            self._bucket,
-            file_name,
-            expires=expires,
-        )
+        current_date = datetime.now(pytz.timezone(timezone))
+
+        # Calculate the new date by adding a timedelta (e.g., 7 days)
+        new_date = current_date + expires
+
+        # Format the new date as "MM/DD/YYYY HH:MM:SS GMT+8"
+        formatted_date = new_date.strftime("%m/%d/%Y %H:%M:%S GMT%z")
+
+        return formatted_date
