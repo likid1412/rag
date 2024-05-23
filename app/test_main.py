@@ -3,6 +3,7 @@
 import os
 from fastapi import status
 from fastapi.testclient import TestClient
+from minio import Minio
 from .main import app
 
 FILE_ID = "a-fa54ff56-7d03-4659-a993-42780a2d911f"
@@ -81,6 +82,10 @@ def test_upload_ok(mocker):
     """test upload"""
 
     mocker.patch("app.storage.storage.Storage.upload_file_data")
+    mocker.patch(
+        "app.storage.storage.Storage._new_client",
+        return_value=Minio(endpoint="www.example.com"),
+    )
     mocker.patch(
         "minio.Minio.presigned_get_object",
         return_value="http://test",
