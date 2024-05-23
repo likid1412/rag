@@ -40,6 +40,8 @@ docker build -t rag .
 # run and start rag
 docker run --env-file .env -dt --name rag -p 80:80 rag
 
+# check rag logs, once success, you should see `Application startup complete.`
+docker container logs rag
 ```
 
 Remember, Docker must be installed on your system to use this method. For installation instructions and more details about Docker, visit the official Docker documentation.
@@ -50,6 +52,13 @@ You can read [FastAPI in Containers](https://fastapi.tiangolo.com/deployment/doc
 
 - You can access your local rag [Interactive API docs](http://127.0.0.1:80/docs)
 - You can access your local rag [Alternative API docs](http://127.0.0.1:80/redoc)
+
+5. **logs**
+
+    We will send logged messages to `app.log` file and the `stdout` using [loguru](https://github.com/Delgan/loguru)
+
+- For `app.log` file, it will located at `/rag/app.log`
+- For `stadout`, you can check it use command such as `docker container logs -f rag`, use `docker container logs --help` to read more
 
 ## API Keys
 
@@ -116,6 +125,78 @@ Check [hunyuan](https://cloud.tencent.com/document/api/1729/105701) for more det
 
 You can find instructions for obtaining a key [here](https://console.cloud.tencent.com/hunyuan/start)
 
+## Endpoint usage examples
+
+Once you have access to rag, you can interact with API using the [Interactive API docs](http://127.0.0.1:80/docs), below is the endpoint usage examples.
+
+### File Upload Endpoint
+
+**Functionality**
+
+- Accepts one or more file uploads (limited to pdf, tiff, png,jpeg formats).
+- Saves the processed file to storage (e.g, MinIO) solution, returning one or more unique file identifiers or signed URLs for the upload.
+
+**Usage example**
+
+- Read the alternative automatic documentation for more [Upload - ReDoc](http://127.0.0.1/redoc#operation/upload_upload_post)
+- Try it out: [File Upload Endpoint: /upload](http://127.0.0.1/docs#/default/upload_upload_post)
+- Click the `Add string item`, and choose file to upload, and will return uploaded file info with the original file name from uploaded file, unique file id, signed URL and unique file name which you can search in minio
+
+![](docs/endpoint_upload.png)
+
+### OCR Endpoint
+
+**Functionality**
+
+- Running an OCR service on the file downloaded from the `signed_url`
+- Process OCR results with embedding models (e.g, OpenAI, Tencent hunyuan)
+- Upload the embeddings to a vector database (e.g, Pinecone, Tencent Vector Database) for future searches.
+
+**Usage example**
+
+- Read the alternative automatic documentation for more [Ocr - ReDoc](http://127.0.0.1/redoc#operation/ocr_ocr_post)
+- Try it out: [OCR Endpoint: /ocr](http://127.0.0.1/docs#/default/ocr_ocr_post)
+- Fill the `signed_url` value with the url got from upload endppoint, this endpoint return immediately, because it will take some times, doing several tasks in the background mention above.
+- The return result look like below, you can check progress using [Get OCR Progress Endpoint](#get-ocr-progress-endpoint) :
+
+![](docs/endpoint_ocr.png)
+
+### Get OCR Progress Endpoint
+
+**Functionality**
+
+- Get ocr progress
+
+**Usage example**
+
+- Read the alternative automatic documentation for more [Get Ocr Progress - ReDoc](http://127.0.0.1/redoc#operation/get_ocr_progress_ocr_progress__file_id__get)
+- Try it out: [Get OCR Progress Endpoint: /ocr_progress/{file_id}](http://127.0.0.1/docs#/default/get_ocr_progress_ocr_progress__file_id__get)
+- Fill the `file_id` which pass to ocr endpoint to get the current progress
+- If still processing, return `{"status": "processing", "progress": 0.xxx}`
+
+    ![](docs/endpoint_ocr_progress.png)
+
+- If completed, return `{"status": "completed"}`
+
+    ![](docs/endpoint_ocr_progress.png)
+
+### Attribute Extraction Endpoint
+
+**Functionality**
+
+- Takes a query text and file_id as input, performs a vector search and returns relevanted text based on the embeddings.
+- Chat with LLM provider (e.g, OpenAI, Tencent hunyuan) to generate the answer from the search result.
+
+**Usage example**
+
+- Read the alternative automatic documentation for more [Extract - ReDoc](http://127.0.0.1/redoc#operation/extract_extract_post)
+- Try it out: [Attribute Extraction Endpoint: /extract](http://127.0.0.1/docs#/default/extract_extract_post)
+- Takes a query text and `file_id` as input, choose LLM provider api (`OpenAI` or `hunyuan`), return the answer from query using LLM and relevant texts search from vector database which related to the file_id
+    - For `OpenAI` api, can use OpenAI model or compatible LLM Provider model such as [Kimi](https://platform.moonshot.cn/console/api-keys)
+    - For `hunyuan` api, can use Tencent hunyuan model
+
+
+![](docs/endpoint_extract.png)
 
 ## TODO
 
