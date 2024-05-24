@@ -7,6 +7,7 @@ from tencentcloud.common.exception.tencent_cloud_sdk_exception import (
 )
 from tencentcloud.hunyuan.v20230901 import models
 from app.client.hunyuan_client import new_hunyuan_client
+from app.exceptions.exceptions import InvalidResponseFromUpStream
 
 
 # pylint: disable=too-few-public-methods
@@ -49,7 +50,9 @@ class Embedding:
             if len(rsp.Data) == 0:
                 msg = f"GetEmbedding rsp data is empty, req: {req}"
                 logger.error(msg)
-                raise ValueError(msg)
+                raise InvalidResponseFromUpStream(
+                    "GetEmbedding rsp data is empty"
+                )
 
             logger.info(
                 f"GetEmbedding success, content: {content},"
@@ -63,7 +66,7 @@ class Embedding:
             if len(vec) == 0:
                 msg = "GetEmbedding Embedding vector is empty"
                 logger.error(msg)
-                raise ValueError(msg)
+                raise InvalidResponseFromUpStream(msg)
 
             return vec
         except TencentCloudSDKException as e:
