@@ -49,7 +49,7 @@ class Ocr:
 
     def _sync_perform_ocr(self) -> None:
         try:
-            self._perform_ocr()
+            self.perform_ocr()
         except Exception as e:
             Ocr.ocr_progress.delete(self.file_info.file_name)
             logger.error(
@@ -57,7 +57,7 @@ class Ocr:
                 f", {traceback.format_exc()}"
             )
 
-    def _perform_ocr(self) -> None:
+    def perform_ocr(self) -> None:
         """Simulates running an OCR service on a file for a given a signed url
 
         Args:
@@ -193,9 +193,7 @@ class Ocr:
         embedding_content = ""
         embedding_content_list: list[str] = []
         max_token = Embedding.EMBEDDING_MAX_TOKEN
-
         total_content_len = 0
-        total_embedding_content_len = 0
 
         for p in paragraphs:
             if "content" not in p:
@@ -228,6 +226,16 @@ class Ocr:
         if len(embedding_content) > 0:
             embedding_content_list.append(embedding_content)
 
+        self._check_embedding_content_list(
+            embedding_content_list, total_content_len
+        )
+
+        return embedding_content_list
+
+    def _check_embedding_content_list(
+        self, embedding_content_list: list[str], total_content_len: int
+    ):
+        total_embedding_content_len = 0
         for item in embedding_content_list:
             total_embedding_content_len += len(item)
 
@@ -250,8 +258,6 @@ class Ocr:
             )
         else:
             logger.info(f"embedding_content_list: {embedding_content_list}")
-
-        return embedding_content_list
 
     def _embedding_and_save_vector(
         self, embedding_content_list: list[str], collection: str

@@ -19,10 +19,28 @@ class Extract:
     )
     ANSWER_NOT_FOUND = "I could not find an answer."
 
-    # TODO: add an note why 4096
-    MAX_TOKEN = int(os.getenv("MAX_TOKEN", "4096"))
+    MAX_TOKEN = int(os.getenv("MAX_TOKEN", "10240"))
+    """
+    The max token of model use (input + output)
+
+    Why max is 10240 (10k) token?
+
+    1. Default retrieve relevant text from vector database is 10 items
+    2. The max embedding input token is 1024 (1k)
+    3. Max token for model input should be 10240 (10k)
+    """
+
     OUTPUT_TOKEN = int(os.getenv("OUTPUT_TOKEN", "500"))
+    """
+    The token of model output, default to 500
+
+    Output should be short in RAG situation (Question answering)
+    """
+
     TOKEN_BUDGET = MAX_TOKEN - OUTPUT_TOKEN
+    """
+    The token of model input = max token - output token
+    """
 
     def __init__(self) -> None:
         pass
@@ -94,8 +112,8 @@ class Extract:
             next_article = f'\n\nparagraph section:\n"""\n{string}\n"""'
             if num_tokens(message + next_article + question) > token_budget:
                 break
-            else:
-                message += next_article
+
+            message += next_article
         return message + question
 
     def ask(
@@ -126,5 +144,5 @@ class Extract:
 
         if api == API_HUNYUAN:
             return hunyuan.chat_completions(messages)
-        else:
-            return openai.chat_completions(messages)
+
+        return openai.chat_completions(messages)

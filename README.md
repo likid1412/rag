@@ -201,7 +201,11 @@ Once you have access to rag, you can interact with API using the [Interactive AP
 ## TODO
 
 - Upload large file using stream upload
-- Add uuid to log for trace
+- Add requestId for trace
+- Add Monitoring and Observability
+    - [What is API Monitoring? Use Cases, Tools & Best Practices | Postman](https://www.postman.com/api-platform/api-monitoring/)
+    - [API Observability: API Telemetry Data, Pillars & Use Cases | Postman](https://www.postman.com/api-platform/api-observability/)
+- TODO/FIXME in code
 
 ## One More Thing
 

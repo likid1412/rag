@@ -1,5 +1,7 @@
 """test"""
 
+# pylint: disable=consider-using-with
+
 import os
 from fastapi import status
 from fastapi.testclient import TestClient
@@ -132,7 +134,7 @@ def test_upload_ok(mocker):
 def test_ocr_bad_case_invalid_url(mocker):
     """test ocr"""
 
-    mocker.patch("app.ocr.ocr.Ocr._perform_ocr")
+    mocker.patch("app.ocr.ocr.Ocr.perform_ocr")
 
     # no url
     with TestClient(app) as client:
@@ -187,7 +189,7 @@ def test_ocr_bad_case_invalid_url(mocker):
 def test_ocr_ok(mocker):
     """test ocr"""
 
-    mocker.patch("app.ocr.ocr.Ocr._perform_ocr")
+    mocker.patch("app.ocr.ocr.Ocr.perform_ocr")
 
     with TestClient(app) as client:
         post_data = {"signed_url": SIGNED_URL}

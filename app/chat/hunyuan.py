@@ -3,10 +3,8 @@
 import os
 import json
 from loguru import logger
-from tencentcloud.common import credential
-from tencentcloud.common.profile.client_profile import ClientProfile
-from tencentcloud.common.profile.http_profile import HttpProfile
-from tencentcloud.hunyuan.v20230901 import hunyuan_client, models
+from tencentcloud.hunyuan.v20230901 import models
+from app.client.hunyuan_client import new_hunyuan_client
 
 
 def chat_completions(messages: list[dict[str, str]]):
@@ -20,7 +18,7 @@ def chat_completions(messages: list[dict[str, str]]):
         str: chat response content
     """
 
-    client = _get_client()
+    client = new_hunyuan_client()
 
     new_msg_list: list[dict] = []
     for msg in messages:
@@ -47,20 +45,3 @@ def chat_completions(messages: list[dict[str, str]]):
     choice = response.Choices[0]
     logger.info(f"response: {response}")
     return choice.Message.Content
-
-
-def _get_client():
-    cred = credential.Credential(
-        os.getenv("TENCENTCLOUD_SECRET_ID"),
-        os.getenv("TENCENTCLOUD_SECRET_KEY"),
-    )
-    # 实例化一个http选项，可选的，没有特殊需求可以跳过
-    http_profile = HttpProfile()
-    http_profile.endpoint = "hunyuan.tencentcloudapi.com"
-
-    # 实例化一个client选项，可选的，没有特殊需求可以跳过
-    client_profile = ClientProfile()
-    client_profile.httpProfile = http_profile
-    # 实例化要请求产品的client对象,clientProfile是可选的
-    client = hunyuan_client.HunyuanClient(cred, "", client_profile)
-    return client

@@ -195,8 +195,8 @@ async def get_ocr_progress(file_id: str = Path(..., min_length=10)) -> dict:
 
     if progress >= 1.0:
         return {"status": "completed"}
-    else:
-        return {"status": "processing", "progress": progress}
+
+    return {"status": "processing", "progress": progress}
 
 
 @app.post("/extract")

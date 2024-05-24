@@ -64,6 +64,7 @@ class VDB:
             )
         return vdb
 
+    # pylint: disable=too-many-arguments
     def __init__(
         self,
         url: str,
@@ -99,6 +100,8 @@ class VDB:
         self.collection = collection
 
     def drop_db(self):
+        """Drop database"""
+
         try:
             db = self._client.database(self._database)
             db.drop_database(self._database)
@@ -119,6 +122,8 @@ class VDB:
     #     db.drop_database(self._database)
 
     def is_db_existed(self) -> Database | None:
+        """check whether database existed or not"""
+
         try:
             db = self._client.database(self._database)
             return db
@@ -131,6 +136,8 @@ class VDB:
         return None
 
     def is_collection_existed(self, collection: str = "") -> Collection | None:
+        """check whether collection existed or not"""
+
         if len(collection) == 0:
             collection = self.collection
 
@@ -192,9 +199,13 @@ class VDB:
     def new_document(
         self, doc_id: str, vector: list[float], content: str
     ) -> Document:
+        """return a new document instance"""
+
         return Document(id=doc_id, vector=vector, content=content)
 
     def upsert_data(self, document_list: list[Document]) -> None:
+        """update or insert document list data into collection"""
+
         # 获取 Collection 对象
         db = self._client.database(self._database)
         coll = db.collection(self.collection)
@@ -212,6 +223,8 @@ class VDB:
         top_k: int = 10,
         retrieve_vector: bool = False,
     ) -> list[dict]:
+        """search using vector"""
+
         # 获取 Collection 对象
         db = self._client.database(self._database)
         coll = db.collection(self.collection)
