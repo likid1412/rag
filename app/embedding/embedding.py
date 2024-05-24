@@ -2,38 +2,26 @@
 
 import os
 from loguru import logger
-from tencentcloud.common import credential
-from tencentcloud.common.profile.client_profile import ClientProfile
-from tencentcloud.common.profile.http_profile import HttpProfile
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import (
     TencentCloudSDKException,
 )
-from tencentcloud.hunyuan.v20230901 import hunyuan_client, models
+from tencentcloud.hunyuan.v20230901 import models
+from app.client.hunyuan_client import new_hunyuan_client
 
 
+# pylint: disable=too-few-public-methods
 class Embedding:
     """Embedding operations"""
 
     EMBEDDING_MAX_TOKEN = int(os.getenv("EMBEDDING_MAX_TOKEN", "1024"))
+    """
+    Embedding input can not over 1024 token
+
+    ref: https://cloud.tencent.com/document/api/1729/102832
+    """
 
     def __init__(self) -> None:
-        self._client = self._get_client()
-
-    def _get_client(self):
-        cred = credential.Credential(
-            os.getenv("TENCENTCLOUD_SECRET_ID"),
-            os.getenv("TENCENTCLOUD_SECRET_KEY"),
-        )
-        # 实例化一个http选项，可选的，没有特殊需求可以跳过
-        http_profile = HttpProfile()
-        http_profile.endpoint = "hunyuan.tencentcloudapi.com"
-
-        # 实例化一个client选项，可选的，没有特殊需求可以跳过
-        client_profile = ClientProfile()
-        client_profile.httpProfile = http_profile
-        # 实例化要请求产品的client对象,clientProfile是可选的
-        client = hunyuan_client.HunyuanClient(cred, "", client_profile)
-        return client
+        self._client = new_hunyuan_client()
 
     def embedding(self, content: str) -> list[float]:
         """embedding content
