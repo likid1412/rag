@@ -2,7 +2,6 @@
 
 import os
 import sys
-import traceback
 from loguru import logger
 from fastapi import (
     FastAPI,
@@ -12,12 +11,16 @@ from fastapi import (
     BackgroundTasks,
     Path,
 )
+
 from .model.payload import OcrPayload, ExtractPayload
 from .valid.valid import validate_files
 from .storage.storage import Storage
 from .ocr.ocr import Ocr
 from .extract.extract import Extract
 from .helper.file import get_file_info_from_signed_url
+from .exceptions.exceptions import (
+    ExceptionHandlingMiddleware,
+)
 
 
 LOG_FORMAT = (
@@ -40,6 +43,9 @@ logger.add(
 
 
 app = FastAPI()
+
+# handle endpoints exception in ExceptionHandlingMiddleware
+app.add_middleware(ExceptionHandlingMiddleware)
 
 
 @app.post("/upload")
@@ -75,50 +81,33 @@ async def upload(files: list[UploadFile]) -> dict:
     # seems fastapi can not do it directly
     # ref:https://github.com/tiangolo/fastapi/issues/2578#issuecomment-752334996
 
-    try:
-        # validate files format
-        validate_files(files)
+    # validate files format
+    validate_files(files)
 
-        s = Storage(Storage.RAG_Bucket)
-        file_dict_list = s.get_file_dict_list(files)
-        logger.info(f"file_dict_list: {file_dict_list}")
+    s = Storage(Storage.RAG_Bucket)
+    file_dict_list = s.get_file_dict_list(files)
+    logger.info(f"file_dict_list: {file_dict_list}")
 
-        # FIXME:
-        # file will get closed (file.close() return True) running in background,
-        # working on solution.
-        # 1. copy and pass the buffer, but that will put
-        # file data into memory, which is bad for large file
-        # TODO: 2. write files to disk, and read them in background (will try)
+    # FIXME:
+    # file will get closed (file.close() return True) running in background,
+    # working on solution.
+    # 1. copy and pass the buffer, but that will put
+    # file data into memory, which is bad for large file
+    # TODO: 2. write files to disk, and read them in background (will try)
 
-        # if background:
-        #     background_tasks.add_task(
-        #         s.upload_file_and_get_presigned_url, file_dict_list
-        #     )
+    # if background:
+    #     background_tasks.add_task(
+    #         s.upload_file_and_get_presigned_url, file_dict_list
+    #     )
 
-        #     file_info_list = []
-        #     for file_dict in file_dict_list:
-        #         file_info_list.append(file_dict["file_info"])
+    #     file_info_list = []
+    #     for file_dict in file_dict_list:
+    #         file_info_list.append(file_dict["file_info"])
 
-        #     return {"file_info_list": file_info_list}
-        # else:
-        upload_result = await s.upload_file_and_get_presigned_url(
-            file_dict_list
-        )
-        return {"upload_result": upload_result}
-
-    except (TypeError, ValueError) as e:
-        logger.error(f"BAD_REQUEST, e: {e}, {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
-    except HTTPException as e:
-        logger.error(f"HTTPException, e: {e}, {traceback.format_exc()}")
-        raise e
-    except Exception as e:
-        logger.error(f"INTERNAL_SERVER_ERROR, e: {e}, {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        ) from e
+    #     return {"file_info_list": file_info_list}
+    # else:
+    upload_result = await s.upload_file_and_get_presigned_url(file_dict_list)
+    return {"upload_result": upload_result}
 
 
 @app.post("/ocr")
@@ -140,31 +129,17 @@ async def ocr(payload: OcrPayload, background_tasks: BackgroundTasks) -> dict:
         - code 500, If internal error happened.
     """
 
-    try:
-        logger.info(f"ocr payload: {payload}")
-        file_info = get_file_info_from_signed_url(payload.signed_url)
-        logger.info(f"file_info: {file_info}")
+    logger.info(f"ocr payload: {payload}")
+    file_info = get_file_info_from_signed_url(payload.signed_url)
+    logger.info(f"file_info: {file_info}")
 
-        o = Ocr(str(payload.signed_url), file_info)
-        background_tasks.add_task(o.perform_ocr_in_background)
-        Ocr.ocr_progress.set(file_info.file_id, 0)
-        return {
-            "status": "processing",
-            "file_id": file_info.file_id,
-        }
-    except (TypeError, ValueError) as e:
-        logger.error(f"BAD_REQUEST, e: {e}, {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
-    except HTTPException as e:
-        logger.error(f"HTTPException, e: {e}, {traceback.format_exc()}")
-        raise e
-    except Exception as e:
-        logger.error(f"INTERNAL_SERVER_ERROR: {e}, {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        ) from e
+    o = Ocr(str(payload.signed_url), file_info)
+    background_tasks.add_task(o.perform_ocr_in_background)
+    Ocr.ocr_progress.set(file_info.file_id, 0)
+    return {
+        "status": "processing",
+        "file_id": file_info.file_id,
+    }
 
 
 @app.get("/ocr_progress/{file_id}")
@@ -216,21 +191,7 @@ async def extract(payload: ExtractPayload) -> dict:
         - code 500, If internal error happened.
     """
 
-    try:
-        ex = Extract()
-        answer = ex.generate_answer(payload.query, payload.file_id, payload.api)
+    ex = Extract()
+    answer = ex.generate_answer(payload.query, payload.file_id, payload.api)
 
-        return {"answer": answer}
-    except (TypeError, ValueError) as e:
-        logger.error(f"BAD_REQUEST, e: {e}, {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        ) from e
-    except HTTPException as e:
-        logger.error(f"HTTPException, e: {e}, {traceback.format_exc()}")
-        raise e
-    except Exception as e:
-        logger.error(f"INTERNAL_SERVER_ERROR: {e}, {traceback.format_exc()}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)
-        ) from e
+    return {"answer": answer}

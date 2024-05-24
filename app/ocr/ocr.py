@@ -16,6 +16,10 @@ from app.helper.uuid import get_uuid
 from app.helper.token import num_tokens
 from app.helper.file import FileInfo
 from app.helper.retry import retry
+from app.exceptions.exceptions import (
+    InvalidResponseFromUpStream,
+    InternalProcessError,
+)
 
 
 class Ocr:
@@ -86,7 +90,7 @@ class Ocr:
             if len(embedding_content_list) == 0:
                 msg = "embedding_content_list is empty"
                 logger.error(msg)
-                raise ValueError(msg)
+                raise InvalidResponseFromUpStream(msg)
 
             Ocr.ocr_progress.set(file_id, 0.11)
 
@@ -133,7 +137,7 @@ class Ocr:
 
         if len(err_msg) > 0:
             logger.error(err_msg)
-            raise ValueError(err_msg)
+            raise InvalidResponseFromUpStream(err_msg)
 
         paragraphs = ocr_result["analyzeResult"]["paragraphs"]
         logger.info(f"paragraphs: {paragraphs[0]}, len: {len(paragraphs)}")
@@ -246,7 +250,7 @@ class Ocr:
                 f" total_embedding_content_len: {total_embedding_content_len}"
             )
             logger.error(msg)
-            raise ValueError(msg)
+            raise InternalProcessError("Miss embedding content")
 
         logger.info(
             f"embedding_content_list len: {len(embedding_content_list)}, "
