@@ -13,6 +13,7 @@ from fastapi import (
 )
 
 from .model.payload import OcrPayload, ExtractPayload
+from .model.file_info import FileInfo
 from .valid.valid import validate_files
 from .storage.storage import Storage
 from .ocr.ocr import Ocr
@@ -49,7 +50,9 @@ app.add_middleware(ExceptionHandlingMiddleware)
 
 
 @app.post("/upload")
-async def upload(files: list[UploadFile]) -> dict:
+async def upload(
+    files: list[UploadFile], background_tasks: BackgroundTasks
+) -> dict:
     """
     Upload files (limited to pdf, tiff, png, jpeg formats),
     saves files to storage, returning file infos (see Returns)
@@ -88,26 +91,44 @@ async def upload(files: list[UploadFile]) -> dict:
     file_dict_list = s.get_file_dict_list(files)
     logger.info(f"file_dict_list: {file_dict_list}")
 
-    # FIXME:
-    # file will get closed (file.close() return True) running in background,
-    # working on solution.
-    # 1. copy and pass the buffer, but that will put
-    # file data into memory, which is bad for large file
-    # TODO: 2. write files to disk, and read them in background (will try)
+    file_info_list = []
+    for file_dict in file_dict_list:
+        file_info: FileInfo = file_dict["file_info"]
+        file_info_list.append(file_dict["file_info"])
+        Storage.upload_results.set(file_info.file_id, {"status": "uploading"})
 
-    # if background:
-    #     background_tasks.add_task(
-    #         s.upload_file_and_get_presigned_url, file_dict_list
-    #     )
+    background_tasks.add_task(s.upload_file_in_background, file_dict_list)
 
-    #     file_info_list = []
-    #     for file_dict in file_dict_list:
-    #         file_info_list.append(file_dict["file_info"])
+    return {"status": "uploading", "file_info_list": file_info_list}
 
-    #     return {"file_info_list": file_info_list}
-    # else:
-    upload_result = await s.upload_file_and_get_presigned_url(file_dict_list)
-    return {"upload_result": upload_result}
+
+@app.get("/upload_progress/{file_id}")
+async def get_upload_progress(file_id: str = Path(..., min_length=10)) -> dict:
+    """get ocr progress of file_id
+
+    Args:
+        file_id (str): file id
+
+    Returns:
+        dict: ocr progress of file_id,
+        status completed will return once finished
+
+    Raises:
+        - code 422, If file_id is not valid, min length >= 10
+        - code 404, If the progress of file_id not found,
+        check whether the file has been process in ocr endpoint or not
+    """
+
+    upload_result = Storage.upload_results.get(file_id)
+    if upload_result is None:
+        msg = f"{file_id} file_id not found"
+        logger.error(msg)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=msg,
+        )
+
+    return upload_result
 
 
 @app.post("/ocr")

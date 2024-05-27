@@ -1,22 +1,25 @@
 """Handle Storage operations, such as upload file"""
 
 import os
-import io
-from typing import BinaryIO
+import time
+import tempfile
+import shutil
 from datetime import datetime, timedelta
 import pytz
 from loguru import logger
 from minio import Minio
 from minio.error import S3Error
 from fastapi import UploadFile
-import starlette.datastructures
 from app.helper.file import get_unique_filename, FileInfo
+from app.helper.safe_dict import ThreadSafeDict
 
 
 class Storage:
     """Handle Storage operations, such as upload file"""
 
     RAG_Bucket = "rag"
+    upload_results: ThreadSafeDict = ThreadSafeDict()
+    """upload results dict, key is file_id, value is upload_result dict"""
 
     _client: Minio
     _bucket: str
@@ -46,47 +49,101 @@ class Storage:
 
     def get_file_dict_list(self, files: list[UploadFile]) -> list[dict]:
         """return a list contain
-        {"file": UploadFile, "file_info": FileInfo} dict
+        {"temp_file_path": path saved UploadFile, "file_info": FileInfo} dict
 
         Args:
             files (list[UploadFile]): uploaded files
 
         Returns:
             list[dict]: a list contain
-        {"file": UploadFile, "file_info": FileInfo} dict
+        {"temp_file_path": path saved UploadFile, "file_info": FileInfo} dict
         """
 
         file_data: list[dict] = []
         for file in files:
+            temp_file_path = ""
+            try:
+                with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                    temp_file_path = temp_file.name
+                    shutil.copyfileobj(file.file, temp_file)
+            except Exception as e:
+                logger.error(f"write to temp_file failed, e: {e}")
+                if len(temp_file_path) > 0 and os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                raise
+
             file_info = get_unique_filename(file.filename)
-            file_data.append({"file": file, "file_info": file_info})
+            file_data.append(
+                {
+                    "file_info": file_info,
+                    "temp_file_path": temp_file_path,
+                }
+            )
         return file_data
 
     def _check_file_params(self, file_dict_list: list[dict]) -> None:
+        msg = ""
         for file_dict in file_dict_list:
             logger.debug(f"file_dict: {file_dict}")
-            msg = ""
-            if "file" not in file_dict:
-                msg = "file not in file_dict"
-            elif "file_info" not in file_dict:
-                msg = "file_info not in file_dict"
-            elif not isinstance(
-                file_dict["file"], starlette.datastructures.UploadFile
-            ):
-                # isinstance(file_dict["file"], UploadFile) return False,
-                # use starlette.datastructures.UploadFile instead
-                msg = f"{file_dict['file']} file value is not UploadFile type"
-            elif not isinstance(file_dict["file_info"], FileInfo):
-                msg = (
-                    f"{file_dict['file_info']} file_info"
-                    f" value is not FileInfo type"
-                )
-            elif file_dict["file"].file.closed:
-                msg = f"{file_dict['file'].filename} is closed"
+            temp_file_path = file_dict.get("temp_file_path", None)
+            file_info = file_dict.get("file_info", None)
 
-            if len(msg) > 0:
-                logger.error(msg)
-                raise ValueError(msg)
+            if not isinstance(temp_file_path, str):
+                msg = f"{temp_file_path} temp_file_path value is not str type"
+                break
+
+            if not isinstance(file_info, FileInfo):
+                msg = f"{file_info} file_info value is not FileInfo type"
+                break
+
+            if not os.path.exists(temp_file_path):
+                msg = f"{temp_file_path} file not existed"
+                break
+
+        if len(msg) > 0:
+            logger.error(msg)
+            raise ValueError(msg)
+
+    async def upload_file_in_background(
+        self,
+        file_dict_list: list[dict],
+    ) -> list[dict]:
+        upload_result: dict[str, dict] = None
+        try:
+            upload_result = await self.upload_file_and_get_presigned_url(
+                file_dict_list
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.error(f"write to temp_file failed, e: {e}")
+
+        for file_dict in file_dict_list:
+            # remove temp file no matter failed or success
+            temp_file_path = file_dict["temp_file_path"]
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+
+            file_info: FileInfo = file_dict["file_info"]
+            if upload_result is None:
+                # failed
+                Storage.upload_results.set(
+                    file_info.file_id, {"status": "failed"}
+                )
+            else:
+                if file_info.file_id not in upload_result:
+                    logger.error(f"{file_info.file_id} not in upload_result")
+                    continue
+
+                # success
+                Storage.upload_results.set(
+                    file_info.file_id,
+                    {
+                        "status": "success",
+                        "result": upload_result[file_info.file_id],
+                    },
+                )
+                logger.info(
+                    f"upload success, {upload_result[file_info.file_id]}"
+                )
 
     async def upload_file_and_get_presigned_url(
         self,
@@ -107,20 +164,18 @@ class Storage:
             ValueError: files invalid
         """
 
-        self._check_file_params(file_dict_list)
+        st = time.time()
+        upload_result: dict[str, dict] = {}
 
-        upload_result: list[dict] = []
+        self._check_file_params(file_dict_list)
 
         # upload
         for file_dict in file_dict_list:
-            file: UploadFile = file_dict["file"]
+            temp_file_path = file_dict["temp_file_path"]
             file_info: FileInfo = file_dict["file_info"]
-            file_content = await file.read()
             self.upload_file_data(
                 destination_file=file_info.file_unique_name,
-                data=io.BytesIO(file_content),
-                length=len(file_content),
-                content_type=file.content_type,
+                file_path=temp_file_path,
             )
 
             # get signed url and etag as file id
@@ -130,15 +185,13 @@ class Storage:
                 object_name=file_info.file_unique_name,
                 expires=expires,
             )
-            upload_result.append(
-                {
-                    "file_info": file_info,
-                    "signed_url": presigned_url,
-                    "expires": self._get_formatted_date(expires),
-                }
-            )
+            upload_result[file_info.file_id] = {
+                "file_info": file_info,
+                "signed_url": presigned_url,
+                "expires": self._get_formatted_date(expires),
+            }
 
-        logger.info(f"upload_result: {upload_result}")
+        logger.info(f"cost: {time.time() - st}, upload_result: {upload_result}")
         return upload_result
 
     def check_or_make_bucket(self):
@@ -154,9 +207,7 @@ class Storage:
     def upload_file_data(
         self,
         destination_file: str,
-        data: BinaryIO,
-        length: int,
-        content_type: str,
+        file_path: str,
     ) -> None:
         """
         Uploads data from source_file to an destination bucket and filename.
@@ -177,12 +228,10 @@ class Storage:
             self.check_or_make_bucket()
 
             # Upload the file, renaming it in the process
-            result = self._client.put_object(
+            result = self._client.fput_object(
                 bucket_name=self._bucket,
                 object_name=destination_file,
-                data=data,
-                length=length,
-                content_type=content_type,
+                file_path=file_path,
             )
 
         except S3Error as e:

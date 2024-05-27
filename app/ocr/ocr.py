@@ -41,7 +41,6 @@ class Ocr:
         self.singed_url = singed_url
         self.file_info = file_info
 
-    # pylint: disable=broad-exception-caught
     async def perform_ocr_in_background(self) -> None:
         """ocr may take long time, perform ocr operation in background"""
 
@@ -54,7 +53,7 @@ class Ocr:
     def _sync_perform_ocr(self) -> None:
         try:
             self.perform_ocr()
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             Ocr.ocr_progress.delete(self.file_info.file_name)
             logger.error(
                 f"perform_ocr failed, file_info: {self.file_info}, e: {e}"
